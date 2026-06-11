@@ -8,6 +8,12 @@ export default {
     icon: UserIcon,
     fields: [
         {
+            name: 'telegramChatId',
+            title: 'Telegram Chat ID',
+            type: 'number',
+            description: 'The numeric Telegram chat ID for the user (used for notifications/nudges).',
+        },
+        {
             name: 'username',
             title: 'Telegram Username',
             type: 'string',

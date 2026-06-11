@@ -1,5 +1,6 @@
 import { Bot, Context, webhookCallback } from "grammy";
 import { client } from "../../../sanity/client";
+import { inngest } from "@/lib/inngest/client";
 import {
     getEntryStep,
     getStepById,
@@ -211,12 +212,27 @@ bot.on("callback_query:data", async (ctx) => {
 
     if (!prospect) {
         // First button click — user has confirmed intent. Create the prospect document.
-        await client.create({
+        // client.create() returns the full created document including its _id.
+        const newProspect = await client.create({
             _type: "prospect",
             username,
+            // Store the numeric Telegram user ID — required for sendMessage API calls.
+            // ctx.from.id is always a number; @usernames cannot be used as chat_id.
+            telegramChatId: ctx.from!.id,
             currentStep: nextStepId,
             lastInteraction: new Date().toISOString(),
         });
+
+        // Trigger the 24-hour abandonment nudge background job in Inngest.
+        await inngest.send({
+            name: "user/started-flow",
+            data: {
+                username: username,
+                prospectId: newProspect._id,
+                telegramChatId: ctx.from!.id,
+            },
+        });
+
     } else {
         // Existing prospect — advance them to the next step.
         await advanceProspect(prospect._id, nextStepId);
