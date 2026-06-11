@@ -1,5 +1,6 @@
 // schemas/prospect.ts
 import { UserIcon } from '@sanity/icons'
+
 export default {
     name: 'prospect',
     title: 'Prospect',
@@ -28,7 +29,7 @@ export default {
             name: 'currentStep',
             title: 'Current Step',
             type: 'string',
-            description: 'The ID of the step the user is currently at in the funnel.',
+            description: 'The ID of the bot step the user is currently at in the funnel.',
         },
         {
             name: 'lastInteraction',
@@ -46,11 +47,22 @@ export default {
             name: 'crmData',
             title: 'CRM Data',
             type: 'object',
-            description: 'Flexible storage for all questionnaire responses.',
+            description:
+                'Flexible container for all campaign-specific responses collected by the bot. ' +
+                'Fields are written dynamically at runtime based on the "Collects Field" setting ' +
+                'on each Bot Step (e.g. crmData.budget, crmData.goal, crmData.timeline). ' +
+                'Values are readable here via the Sanity API even if not shown in the Studio UI.',
+            options: { collapsible: true, collapsed: false },
             fields: [
-                { name: 'budget', type: 'string', title: 'Budget' },
-                { name: 'needs', type: 'text', title: 'User Needs' },
+                {
+                    name: 'helper',
+                    title: 'Data Info',
+                    type: 'string',
+                    readOnly: true,
+                    initialValue: 'Campaign-specific data is collected and stored here dynamically.',
+                    description: 'Fields like budget, goals, or timelines will appear in the API response even if not visible here.',
+                },
             ],
         },
     ],
-};
+}
