@@ -20,9 +20,16 @@ async function fetchProspect(username: string) {
     );
 }
 
-/** * Checks if a step has a delay action. 
- * Shows "typing..." and pauses to simulate work.
- */
+/** Get count of prospects created in the last 24 hours. */
+async function getDailyRegistrationCount(): Promise<number> {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    return await client.fetch(
+        `count(*[_type == "prospect" && _createdAt > $since])`,
+        { since: twentyFourHoursAgo }
+    );
+}
+
+/** * Checks if a step has a delay action. */
 async function handleDelayIfNeeded(ctx: Context, step: BotStep) {
     if ((step.actionType as string) === 'delay_typing') {
         await ctx.replyWithChatAction("typing");
@@ -30,26 +37,16 @@ async function handleDelayIfNeeded(ctx: Context, step: BotStep) {
     }
 }
 
-/**
- * If the step has an "auto_advance" action, wait 2 seconds and 
- * automatically trigger the next step without user input.
- */
+/** Auto-advance if step is marked to do so. */
 async function handleAutoAdvance(ctx: Context, step: BotStep, prospectId: string) {
     if ((step.actionType as string) === 'auto_advance') {
         const nextStepId = resolveNextStepId(step);
-
         if (nextStepId) {
-            // Wait 2 seconds so the user can read the auto-advance message
             await new Promise((resolve) => setTimeout(resolve, 2000));
-
             const nextStep = await getStepById(nextStepId);
             if (nextStep) {
-                // Advance the state in Sanity
                 await advanceProspect(prospectId, nextStepId);
-                // Send the next step
                 await sendStep(ctx, nextStep);
-
-                // Recursively check if the NEXT step is also an auto_advance
                 await handleAutoAdvance(ctx, nextStep, prospectId);
             }
         }
@@ -59,7 +56,6 @@ async function handleAutoAdvance(ctx: Context, step: BotStep, prospectId: string
 /** Create a new prospect or update their currentStep. */
 async function upsertProspect(username: string, stepId: string) {
     const existing = await fetchProspect(username);
-
     if (!existing) {
         await client.create({
             _type: "prospect",
@@ -69,10 +65,7 @@ async function upsertProspect(username: string, stepId: string) {
         });
     } else {
         await client.patch(existing._id)
-            .set({
-                currentStep: stepId,
-                lastInteraction: new Date().toISOString(),
-            })
+            .set({ currentStep: stepId, lastInteraction: new Date().toISOString() })
             .commit();
     }
     return existing;
@@ -111,6 +104,12 @@ async function advanceProspect(prospectId: string, nextStepId: string, collectsF
 
 /** Render a BotStep document as a Telegram message. */
 async function sendStep(ctx: Context, step: BotStep) {
+    // 1. Get the dynamic count
+    const count = await getDailyRegistrationCount();
+
+    // 2. Inject the count into the message text if the placeholder exists
+    let messageText = step.messageText.replace(/{{daily_count}}/g, count.toString());
+
     const parse_mode = step.parseMode && step.parseMode !== "none" ? (step.parseMode as "Markdown" | "HTML") : undefined;
 
     if (step.buttons?.length) {
@@ -119,12 +118,12 @@ async function sendStep(ctx: Context, step: BotStep) {
                 btn.url ? { text: btn.label, url: btn.url } : { text: btn.label, callback_data: btn.nextStepId! }
             ),
         ];
-        await ctx.reply(step.messageText, { parse_mode, reply_markup: { inline_keyboard } });
+        await ctx.reply(messageText, { parse_mode, reply_markup: { inline_keyboard } });
         return;
     }
 
     if (step.actionType === "request_contact") {
-        await ctx.reply(step.messageText, {
+        await ctx.reply(messageText, {
             parse_mode,
             reply_markup: {
                 keyboard: [[{ text: "📱 ስልክ ቁጥሬን ላጋራ", request_contact: true }]],
@@ -135,25 +134,21 @@ async function sendStep(ctx: Context, step: BotStep) {
         return;
     }
 
-    await ctx.reply(step.messageText, { parse_mode, reply_markup: { remove_keyboard: true } });
+    await ctx.reply(messageText, { parse_mode, reply_markup: { remove_keyboard: true } });
 }
 
 // ─── Bot Handlers ─────────────────────────────────────────────────────────────
 
-// 1. Start Command
 bot.command("start", async (ctx) => {
     const username = ctx.from?.username;
     if (!username) return await ctx.reply("Please set a username.");
-
     const entryStep = await getEntryStep();
     if (!entryStep) return await ctx.reply("Bot not configured.");
 
     await handleDelayIfNeeded(ctx, entryStep);
     await sendStep(ctx, entryStep);
-    // Note: No handleAutoAdvance here as the prospect doesn't exist yet
 });
 
-// 2. Button clicks (Callback Queries)
 bot.on("callback_query:data", async (ctx) => {
     const nextStepId = ctx.callbackQuery.data;
     const username = ctx.from?.username;
@@ -174,7 +169,6 @@ bot.on("callback_query:data", async (ctx) => {
             currentStep: nextStepId,
             lastInteraction: new Date().toISOString(),
         });
-
         await inngest.send({
             name: "user/started-flow",
             data: { username, prospectId: newProspect._id, telegramChatId: ctx.from!.id },
@@ -189,12 +183,10 @@ bot.on("callback_query:data", async (ctx) => {
     await handleAutoAdvance(ctx, nextStep, prospect._id);
 });
 
-// 3. Text messages (Collecting Data)
 bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
     const username = ctx.from?.username;
     if (!username) return;
-
     const prospect = await fetchProspect(username);
     if (!prospect) return;
 
@@ -216,11 +208,9 @@ bot.on("message:text", async (ctx) => {
     await handleAutoAdvance(ctx, nextStep, prospect._id);
 });
 
-// 4. Shared contact (Phone number)
 bot.on("message:contact", async (ctx) => {
     const username = ctx.from?.username;
     if (!username) return;
-
     const prospect = await fetchProspect(username);
     if (!prospect) return;
 
@@ -246,8 +236,6 @@ bot.on("message:contact", async (ctx) => {
     await handleAutoAdvance(ctx, nextStep, prospect._id);
 });
 
-// ─── Bot Description Syncing ──────────────────────────────────────────────────
-
 let lastSyncTime = 0;
 const SYNC_COOLDOWN = 10 * 60 * 1000;
 
@@ -263,8 +251,6 @@ async function syncBotDescriptionIfNeeded() {
         console.error("Failed to sync description:", err);
     }
 }
-
-// ─── Vercel Export ────────────────────────────────────────────────────────────
 
 const webhookHandler = webhookCallback(bot, "std/http", {
     secretToken: process.env.WEBHOOK_SECRET,
