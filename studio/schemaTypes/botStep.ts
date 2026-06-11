@@ -79,6 +79,8 @@ export default defineType({
                 list: [
                     { title: 'None', value: 'none' },
                     { title: 'Request Phone Number', value: 'request_contact' },
+                    { title: 'Delay (Typing Animation)', value: 'delay_typing' }, // Add this line
+
                 ],
                 layout: 'radio',
             },

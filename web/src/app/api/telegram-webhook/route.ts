@@ -10,7 +10,7 @@ import {
 
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN!);
 
-// ─── Prospect Helpers ─────────────────────────────────────────────────────────
+// ─── Helper Functions ─────────────────────────────────────────────────────────
 
 /** Fetch a prospect document by Telegram username. */
 async function fetchProspect(username: string) {
@@ -20,10 +20,19 @@ async function fetchProspect(username: string) {
     );
 }
 
-/**
- * Create a new prospect or update their currentStep.
- * Always updates lastInteraction timestamp.
+/** * Checks if a step has a delay action. 
+ * If so, shows "typing..." for 3.5 seconds to simulate background work.
  */
+async function handleDelayIfNeeded(ctx: Context, step: BotStep) {
+    if ((step.actionType as string) === 'delay_typing') {
+        // Show "bot is typing..." animation in Telegram
+        await ctx.replyWithChatAction("typing");
+        // Pause execution for 3.5 seconds
+        await new Promise((resolve) => setTimeout(resolve, 3500));
+    }
+}
+
+/** Create a new prospect or update their currentStep. */
 async function upsertProspect(username: string, stepId: string) {
     const existing = await fetchProspect(username);
 
@@ -42,114 +51,59 @@ async function upsertProspect(username: string, stepId: string) {
             })
             .commit();
     }
-
     return existing;
 }
 
-
-/**
- * Save a collected field value to the prospect document.
- *
- * - Top-level fields ("name", "phone"): patched directly.
- * - crmData fields ("crmData.website", "crmData.budget"):
- *     upserted into the crmData array — updates if the key exists, appends if new.
- */
+/** Save a collected field value to the prospect document. */
 async function saveCollectedField(prospectId: string, fieldPath: string, value: string) {
     if (fieldPath.startsWith('crmData.')) {
         const fieldKey = fieldPath.slice('crmData.'.length);
-
-        const doc = await client.fetch(
-            `*[_id == $id][0]{ crmData }`,
-            { id: prospectId }
-        );
-        const entries: Array<{ _key: string; key: string; value: string }> =
-            doc?.crmData ?? [];
+        const doc = await client.fetch(`*[_id == $id][0]{ crmData }`, { id: prospectId });
+        const entries: Array<{ _key: string; key: string; value: string }> = doc?.crmData ?? [];
         const existingIndex = entries.findIndex((e) => e.key === fieldKey);
 
         if (existingIndex >= 0) {
-            await client
-                .patch(prospectId)
-                .set({ [`crmData[${existingIndex}].value`]: value })
-                .commit();
+            await client.patch(prospectId).set({ [`crmData[${existingIndex}].value`]: value }).commit();
         } else {
-            await client
-                .patch(prospectId)
-                .setIfMissing({ crmData: [] })
-                .append('crmData', [{ _key: fieldKey, key: fieldKey, value }])
-                .commit();
+            await client.patch(prospectId).setIfMissing({ crmData: [] }).append('crmData', [{ _key: fieldKey, key: fieldKey, value }]).commit();
         }
     } else {
-        // Top-level field: name, phone, etc.
-        await client
-            .patch(prospectId)
-            .set({ [fieldPath]: value, lastInteraction: new Date().toISOString() })
-            .commit();
+        await client.patch(prospectId).set({ [fieldPath]: value, lastInteraction: new Date().toISOString() }).commit();
     }
 }
 
-/**
- * Advance a prospect to the next step.
- * If the current step collected a field, saves it first via saveCollectedField.
- */
-async function advanceProspect(
-    prospectId: string,
-    nextStepId: string,
-    collectsField?: string,
-    collectedValue?: string
-) {
-    // Save the collected field first (handles both top-level and crmData array)
+/** Advance a prospect to the next step. */
+async function advanceProspect(prospectId: string, nextStepId: string, collectsField?: string, collectedValue?: string) {
     if (collectsField && collectedValue !== undefined) {
         await saveCollectedField(prospectId, collectsField, collectedValue);
     }
-
-    // Advance to the next step
-    await client
-        .patch(prospectId)
-        .set({
-            currentStep: nextStepId,
-            lastInteraction: new Date().toISOString(),
-        })
-        .commit();
+    await client.patch(prospectId).set({
+        currentStep: nextStepId,
+        lastInteraction: new Date().toISOString(),
+    }).commit();
 }
 
 // ─── Telegram Renderer ────────────────────────────────────────────────────────
 
-/**
- * Render a BotStep document as a Telegram message.
- *
- * Rendering rules (in priority order):
- *  1. step.buttons  → inline_keyboard
- *  2. actionType === "request_contact" → native phone-share keyboard
- *  3. Everything else → plain text reply (keyboard removed if previously shown)
- */
+/** Render a BotStep document as a Telegram message. */
 async function sendStep(ctx: Context, step: BotStep) {
-    const parse_mode =
-        step.parseMode && step.parseMode !== "none"
-            ? (step.parseMode as "Markdown" | "HTML")
-            : undefined;
+    const parse_mode = step.parseMode && step.parseMode !== "none" ? (step.parseMode as "Markdown" | "HTML") : undefined;
 
-    // 1. Inline keyboard buttons
     if (step.buttons?.length) {
         const inline_keyboard = [
             step.buttons.map((btn) =>
-                btn.url
-                    ? { text: btn.label, url: btn.url }
-                    : { text: btn.label, callback_data: btn.nextStepId! }
+                btn.url ? { text: btn.label, url: btn.url } : { text: btn.label, callback_data: btn.nextStepId! }
             ),
         ];
-        await ctx.reply(step.messageText, {
-            parse_mode,
-            reply_markup: { inline_keyboard },
-        });
+        await ctx.reply(step.messageText, { parse_mode, reply_markup: { inline_keyboard } });
         return;
     }
 
-    // 2. Native phone-share keyboard
     if (step.actionType === "request_contact") {
         await ctx.reply(step.messageText, {
             parse_mode,
             reply_markup: {
-                keyboard: [[{ text: "📱 Share My Phone Number", request_contact: true }]],
+                keyboard: [[{ text: "📱 ስልክ ቁጥሬን ላጋራ", request_contact: true }]],
                 one_time_keyboard: true,
                 resize_keyboard: true,
             },
@@ -157,42 +111,25 @@ async function sendStep(ctx: Context, step: BotStep) {
         return;
     }
 
-    // 3. Plain text (also removes any previous reply keyboard)
-    await ctx.reply(step.messageText, {
-        parse_mode,
-        reply_markup: { remove_keyboard: true },
-    });
+    await ctx.reply(step.messageText, { parse_mode, reply_markup: { remove_keyboard: true } });
 }
 
 // ─── Bot Handlers ─────────────────────────────────────────────────────────────
 
-// 1. /start — Show the entry step. NO prospect is created here.
-//    Prospect creation is deferred until the user confirms by clicking the first button.
-//    This filters out accidental /start taps and ensures only intentional leads are stored.
+// 1. Start Command
 bot.command("start", async (ctx) => {
     const username = ctx.from?.username;
-    if (!username) {
-        await ctx.reply(
-            "Please set a Telegram username in your account settings to use this bot."
-        );
-        return;
-    }
+    if (!username) return await ctx.reply("Please set a username.");
 
     const entryStep = await getEntryStep();
-    if (!entryStep) {
-        await ctx.reply(
-            "This bot hasn't been configured yet. Please check back soon."
-        );
-        return;
-    }
+    if (!entryStep) return await ctx.reply("Bot not configured.");
 
-    // Just render the entry step — no Sanity write.
+    // Check for delay, then render
+    await handleDelayIfNeeded(ctx, entryStep);
     await sendStep(ctx, entryStep);
 });
 
-// 2. Inline button clicks — the callback_data IS the nextStepId.
-//    LAZY CREATION: if no prospect exists yet, this is the first confirmation click
-//    (e.g. the "Yes, I'm interested" button on the entry step). Create the prospect NOW.
+// 2. Button clicks (Callback Queries)
 bot.on("callback_query:data", async (ctx) => {
     const nextStepId = ctx.callbackQuery.data;
     const username = ctx.from?.username;
@@ -201,47 +138,33 @@ bot.on("callback_query:data", async (ctx) => {
     if (!username) return;
 
     const nextStep = await getStepById(nextStepId);
-    if (!nextStep) {
-        await ctx.reply(
-            "⚠️ This step hasn't been configured yet. Please contact support."
-        );
-        return;
-    }
+    if (!nextStep) return;
 
     let prospect = await fetchProspect(username);
 
     if (!prospect) {
-        // First button click — user has confirmed intent. Create the prospect document.
-        // client.create() returns the full created document including its _id.
         const newProspect = await client.create({
             _type: "prospect",
             username,
-            // Store the numeric Telegram user ID — required for sendMessage API calls.
-            // ctx.from.id is always a number; @usernames cannot be used as chat_id.
             telegramChatId: ctx.from!.id,
             currentStep: nextStepId,
             lastInteraction: new Date().toISOString(),
         });
 
-        // Trigger the 24-hour abandonment nudge background job in Inngest.
         await inngest.send({
             name: "user/started-flow",
-            data: {
-                username: username,
-                prospectId: newProspect._id,
-                telegramChatId: ctx.from!.id,
-            },
+            data: { username, prospectId: newProspect._id, telegramChatId: ctx.from!.id },
         });
-
     } else {
-        // Existing prospect — advance them to the next step.
         await advanceProspect(prospect._id, nextStepId);
     }
 
+    // Process delay before rendering next step
+    await handleDelayIfNeeded(ctx, nextStep);
     await sendStep(ctx, nextStep);
 });
 
-// 3. Text message — save collected data, then advance to the next step
+// 3. Text messages (Collecting Data)
 bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
     const username = ctx.from?.username;
@@ -255,10 +178,7 @@ bot.on("message:text", async (ctx) => {
 
     const nextStepId = resolveNextStepId(currentStep);
     if (!nextStepId) {
-        // Terminal state — save collected data if any, but don't advance
-        if (currentStep.collectsField) {
-            await saveCollectedField(prospect._id, currentStep.collectsField, text);
-        }
+        if (currentStep.collectsField) await saveCollectedField(prospect._id, currentStep.collectsField, text);
         return;
     }
 
@@ -266,10 +186,13 @@ bot.on("message:text", async (ctx) => {
     if (!nextStep) return;
 
     await advanceProspect(prospect._id, nextStepId, currentStep.collectsField, text);
+
+    // Process delay before rendering next step
+    await handleDelayIfNeeded(ctx, nextStep);
     await sendStep(ctx, nextStep);
 });
 
-// 4. Shared contact (phone number) — save phone, then advance
+// 4. Shared contact (Phone number)
 bot.on("message:contact", async (ctx) => {
     const username = ctx.from?.username;
     if (!username) return;
@@ -278,21 +201,15 @@ bot.on("message:contact", async (ctx) => {
     if (!prospect) return;
 
     const currentStep = await getStepById(prospect.currentStep);
-    // Only process if the current step expects a contact
     if (!currentStep || currentStep.actionType !== "request_contact") return;
 
     const phone = ctx.message.contact.phone_number;
-
-    // Save to the collectsField if defined, otherwise default to top-level "phone"
     const phoneField = currentStep.collectsField ?? "phone";
 
     const nextStepId = resolveNextStepId(currentStep);
     if (!nextStepId) {
-        // Terminal step — save data and close the keyboard
         await saveCollectedField(prospect._id, phoneField, phone);
-        await ctx.reply("Thank you! Your response has been recorded.", {
-            reply_markup: { remove_keyboard: true },
-        });
+        await ctx.reply("Thank you! Your response has been recorded.", { reply_markup: { remove_keyboard: true } });
         return;
     }
 
@@ -300,13 +217,16 @@ bot.on("message:contact", async (ctx) => {
     if (!nextStep) return;
 
     await advanceProspect(prospect._id, nextStepId, phoneField, phone);
+
+    // Process delay before rendering next step
+    await handleDelayIfNeeded(ctx, nextStep);
     await sendStep(ctx, nextStep);
 });
 
-// ─── Bot Description Syncing (with 10-minute cooldown) ─────────────────────────
+// ─── Bot Description Syncing ──────────────────────────────────────────────────
 
 let lastSyncTime = 0;
-const SYNC_COOLDOWN = 10 * 60 * 1000; // 10 minutes
+const SYNC_COOLDOWN = 10 * 60 * 1000;
 
 async function syncBotDescriptionIfNeeded() {
     if (Date.now() - lastSyncTime < SYNC_COOLDOWN) return;
@@ -315,10 +235,9 @@ async function syncBotDescriptionIfNeeded() {
         const entryStep = await getEntryStep();
         if (entryStep?.botDescription) {
             await bot.api.setMyDescription(entryStep.botDescription);
-            console.log("Successfully synced bot description with Telegram:", entryStep.botDescription);
         }
     } catch (err) {
-        console.error("Failed to sync bot description:", err);
+        console.error("Failed to sync description:", err);
     }
 }
 
@@ -329,7 +248,6 @@ const webhookHandler = webhookCallback(bot, "std/http", {
 });
 
 export const POST = async (req: Request) => {
-    // Sync description periodically (rate-limited to 10 minutes)
     await syncBotDescriptionIfNeeded();
     return webhookHandler(req);
 };
