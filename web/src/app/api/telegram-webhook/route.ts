@@ -45,21 +45,68 @@ async function upsertProspect(username: string, stepId: string) {
     return existing;
 }
 
+
 /**
- * Advance a prospect to the next step and update lastInteraction.
- * Accepts any extra fields to patch at the same time (e.g. name, crmData.budget).
+ * Save a collected field value to the prospect document.
+ *
+ * - Top-level fields ("name", "phone"): patched directly.
+ * - crmData fields ("crmData.website", "crmData.budget"):
+ *     upserted into the crmData array — updates if the key exists, appends if new.
+ */
+async function saveCollectedField(prospectId: string, fieldPath: string, value: string) {
+    if (fieldPath.startsWith('crmData.')) {
+        const fieldKey = fieldPath.slice('crmData.'.length);
+
+        const doc = await client.fetch(
+            `*[_id == $id][0]{ crmData }`,
+            { id: prospectId }
+        );
+        const entries: Array<{ _key: string; key: string; value: string }> =
+            doc?.crmData ?? [];
+        const existingIndex = entries.findIndex((e) => e.key === fieldKey);
+
+        if (existingIndex >= 0) {
+            await client
+                .patch(prospectId)
+                .set({ [`crmData[${existingIndex}].value`]: value })
+                .commit();
+        } else {
+            await client
+                .patch(prospectId)
+                .setIfMissing({ crmData: [] })
+                .append('crmData', [{ _key: fieldKey, key: fieldKey, value }])
+                .commit();
+        }
+    } else {
+        // Top-level field: name, phone, etc.
+        await client
+            .patch(prospectId)
+            .set({ [fieldPath]: value, lastInteraction: new Date().toISOString() })
+            .commit();
+    }
+}
+
+/**
+ * Advance a prospect to the next step.
+ * If the current step collected a field, saves it first via saveCollectedField.
  */
 async function advanceProspect(
     prospectId: string,
     nextStepId: string,
-    extraFields: Record<string, string> = {}
+    collectsField?: string,
+    collectedValue?: string
 ) {
+    // Save the collected field first (handles both top-level and crmData array)
+    if (collectsField && collectedValue !== undefined) {
+        await saveCollectedField(prospectId, collectsField, collectedValue);
+    }
+
+    // Advance to the next step
     await client
         .patch(prospectId)
         .set({
             currentStep: nextStepId,
             lastInteraction: new Date().toISOString(),
-            ...extraFields,
         })
         .commit();
 }
@@ -175,18 +222,11 @@ bot.on("message:text", async (ctx) => {
     const currentStep = await getStepById(prospect.currentStep);
     if (!currentStep) return;
 
-    // Determine what extra fields to patch alongside currentStep
-    const extraFields: Record<string, string> = {};
-    if (currentStep.collectsField) {
-        extraFields[currentStep.collectsField] = text;
-    }
-
     const nextStepId = resolveNextStepId(currentStep);
     if (!nextStepId) {
-        // No next step defined — the user has reached a terminal state.
-        // Save collected data but do nothing else.
-        if (Object.keys(extraFields).length) {
-            await client.patch(prospect._id).set(extraFields).commit();
+        // Terminal state — save collected data if any, but don't advance
+        if (currentStep.collectsField) {
+            await saveCollectedField(prospect._id, currentStep.collectsField, text);
         }
         return;
     }
@@ -194,7 +234,7 @@ bot.on("message:text", async (ctx) => {
     const nextStep = await getStepById(nextStepId);
     if (!nextStep) return;
 
-    await advanceProspect(prospect._id, nextStepId, extraFields);
+    await advanceProspect(prospect._id, nextStepId, currentStep.collectsField, text);
     await sendStep(ctx, nextStep);
 });
 
@@ -214,15 +254,11 @@ bot.on("message:contact", async (ctx) => {
 
     // Save to the collectsField if defined, otherwise default to top-level "phone"
     const phoneField = currentStep.collectsField ?? "phone";
-    const extraFields: Record<string, string> = { [phoneField]: phone };
 
     const nextStepId = resolveNextStepId(currentStep);
     if (!nextStepId) {
         // Terminal step — save data and close the keyboard
-        await client
-            .patch(prospect._id)
-            .set({ ...extraFields, lastInteraction: new Date().toISOString() })
-            .commit();
+        await saveCollectedField(prospect._id, phoneField, phone);
         await ctx.reply("Thank you! Your response has been recorded.", {
             reply_markup: { remove_keyboard: true },
         });
@@ -232,7 +268,7 @@ bot.on("message:contact", async (ctx) => {
     const nextStep = await getStepById(nextStepId);
     if (!nextStep) return;
 
-    await advanceProspect(prospect._id, nextStepId, extraFields);
+    await advanceProspect(prospect._id, nextStepId, phoneField, phone);
     await sendStep(ctx, nextStep);
 });
 

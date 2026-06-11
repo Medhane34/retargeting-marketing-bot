@@ -46,21 +46,36 @@ export default {
         {
             name: 'crmData',
             title: 'CRM Data',
-            type: 'object',
+            type: 'array',
             description:
-                'Flexible container for all campaign-specific responses collected by the bot. ' +
-                'Fields are written dynamically at runtime based on the "Collects Field" setting ' +
-                'on each Bot Step (e.g. crmData.budget, crmData.goal, crmData.timeline). ' +
-                'Values are readable here via the Sanity API even if not shown in the Studio UI.',
-            options: { collapsible: true, collapsed: false },
-            fields: [
+                'All campaign-specific responses collected by the bot, stored as key → value pairs. ' +
+                'Each entry corresponds to a Bot Step with a "Collects Field" value like "crmData.budget". ' +
+                'Use the key to identify the field (e.g. "website", "budget") and value for the user\'s answer.',
+            of: [
                 {
-                    name: 'helper',
-                    title: 'Data Info',
-                    type: 'string',
-                    readOnly: true,
-                    initialValue: 'Campaign-specific data is collected and stored here dynamically.',
-                    description: 'Fields like budget, goals, or timelines will appear in the API response even if not visible here.',
+                    type: 'object',
+                    name: 'crmEntry',
+                    fields: [
+                        {
+                            name: 'key',
+                            title: 'Field',
+                            type: 'string',
+                            description: 'Machine-readable field name (e.g. "website", "budget", "goal").',
+                            readOnly: true,
+                        },
+                        {
+                            name: 'value',
+                            title: 'Response',
+                            type: 'string',
+                            description: 'The answer provided by the prospect.',
+                        },
+                    ],
+                    preview: {
+                        select: { title: 'key', subtitle: 'value' },
+                        prepare({ title, subtitle }: { title: string; subtitle: string }) {
+                            return { title, subtitle };
+                        },
+                    },
                 },
             ],
         },
