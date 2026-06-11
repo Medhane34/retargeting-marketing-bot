@@ -21,14 +21,38 @@ async function fetchProspect(username: string) {
 }
 
 /** * Checks if a step has a delay action. 
- * If so, shows "typing..." for 3.5 seconds to simulate background work.
+ * Shows "typing..." and pauses to simulate work.
  */
 async function handleDelayIfNeeded(ctx: Context, step: BotStep) {
     if ((step.actionType as string) === 'delay_typing') {
-        // Show "bot is typing..." animation in Telegram
         await ctx.replyWithChatAction("typing");
-        // Pause execution for 3.5 seconds
         await new Promise((resolve) => setTimeout(resolve, 3500));
+    }
+}
+
+/**
+ * If the step has an "auto_advance" action, wait 2 seconds and 
+ * automatically trigger the next step without user input.
+ */
+async function handleAutoAdvance(ctx: Context, step: BotStep, prospectId: string) {
+    if ((step.actionType as string) === 'auto_advance') {
+        const nextStepId = resolveNextStepId(step);
+
+        if (nextStepId) {
+            // Wait 2 seconds so the user can read the auto-advance message
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+
+            const nextStep = await getStepById(nextStepId);
+            if (nextStep) {
+                // Advance the state in Sanity
+                await advanceProspect(prospectId, nextStepId);
+                // Send the next step
+                await sendStep(ctx, nextStep);
+
+                // Recursively check if the NEXT step is also an auto_advance
+                await handleAutoAdvance(ctx, nextStep, prospectId);
+            }
+        }
     }
 }
 
@@ -124,9 +148,9 @@ bot.command("start", async (ctx) => {
     const entryStep = await getEntryStep();
     if (!entryStep) return await ctx.reply("Bot not configured.");
 
-    // Check for delay, then render
     await handleDelayIfNeeded(ctx, entryStep);
     await sendStep(ctx, entryStep);
+    // Note: No handleAutoAdvance here as the prospect doesn't exist yet
 });
 
 // 2. Button clicks (Callback Queries)
@@ -155,13 +179,14 @@ bot.on("callback_query:data", async (ctx) => {
             name: "user/started-flow",
             data: { username, prospectId: newProspect._id, telegramChatId: ctx.from!.id },
         });
+        prospect = newProspect;
     } else {
         await advanceProspect(prospect._id, nextStepId);
     }
 
-    // Process delay before rendering next step
     await handleDelayIfNeeded(ctx, nextStep);
     await sendStep(ctx, nextStep);
+    await handleAutoAdvance(ctx, nextStep, prospect._id);
 });
 
 // 3. Text messages (Collecting Data)
@@ -186,10 +211,9 @@ bot.on("message:text", async (ctx) => {
     if (!nextStep) return;
 
     await advanceProspect(prospect._id, nextStepId, currentStep.collectsField, text);
-
-    // Process delay before rendering next step
     await handleDelayIfNeeded(ctx, nextStep);
     await sendStep(ctx, nextStep);
+    await handleAutoAdvance(ctx, nextStep, prospect._id);
 });
 
 // 4. Shared contact (Phone number)
@@ -217,10 +241,9 @@ bot.on("message:contact", async (ctx) => {
     if (!nextStep) return;
 
     await advanceProspect(prospect._id, nextStepId, phoneField, phone);
-
-    // Process delay before rendering next step
     await handleDelayIfNeeded(ctx, nextStep);
     await sendStep(ctx, nextStep);
+    await handleAutoAdvance(ctx, nextStep, prospect._id);
 });
 
 // ─── Bot Description Syncing ──────────────────────────────────────────────────

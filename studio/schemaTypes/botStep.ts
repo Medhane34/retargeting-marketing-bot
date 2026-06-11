@@ -80,7 +80,7 @@ export default defineType({
                     { title: 'None', value: 'none' },
                     { title: 'Request Phone Number', value: 'request_contact' },
                     { title: 'Delay (Typing Animation)', value: 'delay_typing' }, // Add this line
-
+                    { title: 'Auto-Advance to Next Step', value: 'auto_advance' }, // Add this
                 ],
                 layout: 'radio',
             },
