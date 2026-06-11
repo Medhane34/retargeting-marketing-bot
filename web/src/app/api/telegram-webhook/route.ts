@@ -165,7 +165,9 @@ async function sendStep(ctx: Context, step: BotStep) {
 
 // ─── Bot Handlers ─────────────────────────────────────────────────────────────
 
-// 1. /start — Load the entry step from Sanity and begin the flow
+// 1. /start — Show the entry step. NO prospect is created here.
+//    Prospect creation is deferred until the user confirms by clicking the first button.
+//    This filters out accidental /start taps and ensures only intentional leads are stored.
 bot.command("start", async (ctx) => {
     const username = ctx.from?.username;
     if (!username) {
@@ -183,20 +185,19 @@ bot.command("start", async (ctx) => {
         return;
     }
 
-    await upsertProspect(username, entryStep.stepId);
+    // Just render the entry step — no Sanity write.
     await sendStep(ctx, entryStep);
 });
 
-// 2. Inline button clicks — the callback_data IS the nextStepId
+// 2. Inline button clicks — the callback_data IS the nextStepId.
+//    LAZY CREATION: if no prospect exists yet, this is the first confirmation click
+//    (e.g. the "Yes, I'm interested" button on the entry step). Create the prospect NOW.
 bot.on("callback_query:data", async (ctx) => {
     const nextStepId = ctx.callbackQuery.data;
     const username = ctx.from?.username;
     await ctx.answerCallbackQuery();
 
     if (!username) return;
-
-    const prospect = await fetchProspect(username);
-    if (!prospect) return;
 
     const nextStep = await getStepById(nextStepId);
     if (!nextStep) {
@@ -206,7 +207,21 @@ bot.on("callback_query:data", async (ctx) => {
         return;
     }
 
-    await advanceProspect(prospect._id, nextStepId);
+    let prospect = await fetchProspect(username);
+
+    if (!prospect) {
+        // First button click — user has confirmed intent. Create the prospect document.
+        await client.create({
+            _type: "prospect",
+            username,
+            currentStep: nextStepId,
+            lastInteraction: new Date().toISOString(),
+        });
+    } else {
+        // Existing prospect — advance them to the next step.
+        await advanceProspect(prospect._id, nextStepId);
+    }
+
     await sendStep(ctx, nextStep);
 });
 
