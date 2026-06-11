@@ -1,3 +1,5 @@
-import post from './post'
+// schemas/index.ts
+import botStep from './botStep';
+import prospect from './prospect';
 
-export const schemaTypes = [post]
+export const schemaTypes = [botStep, prospect];
