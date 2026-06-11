@@ -1,6 +1,7 @@
+// Replace your existing imports with these relative paths
 import { Bot, webhookCallback } from "grammy";
-import { client } from "@/sanity/client";
-import { getNextStep } from "@/lib/transitionEngine";
+import { client } from "../../../sanity/client";
+import { getNextStep } from "../../../lib/transitionEngine";
 import validator from "validator";
 
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN!);
