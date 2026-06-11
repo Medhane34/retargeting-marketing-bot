@@ -1,7 +1,5 @@
 import { Bot, webhookCallback } from "grammy";
 import { client } from "../../../sanity/client";
-import { getNextStep } from "../../../lib/transitionEngine";
-import validator from "validator";
 
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN!);
 
@@ -17,19 +15,15 @@ bot.command("start", async (ctx) => {
 // 2. Handle button clicks
 bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
-
-    // Always acknowledge callback to stop Telegram's loading animation
     await ctx.answerCallbackQuery();
 
     if (data === "verify_continue") {
         const username = ctx.from.username;
-
         if (!username) {
-            await ctx.reply("Please set a Telegram username in your profile to continue.");
+            await ctx.reply("Please set a Telegram username to continue.");
             return;
         }
 
-        // Check for existing prospect
         const existing = await client.fetch(
             `*[_type == "prospect" && username == $username][0]`,
             { username }
@@ -39,11 +33,10 @@ bot.on("callback_query:data", async (ctx) => {
             await client.create({
                 _type: 'prospect',
                 username: username,
-                currentStep: 'collect_name', // Start the flow here
+                currentStep: 'collect_name',
                 lastInteraction: new Date().toISOString()
             });
         } else {
-            // Reset existing prospect to start of flow
             await client.patch(existing._id)
                 .set({ currentStep: 'collect_name' })
                 .commit();
@@ -53,61 +46,67 @@ bot.on("callback_query:data", async (ctx) => {
     }
 });
 
-// 3. Handle user text messages (The State Machine)
+// 3. Handle user text messages
 bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
     const username = ctx.from.username;
-
     if (!username) return;
 
-    // Fetch current state
     const prospect = await client.fetch(
         `*[_type == "prospect" && username == $username][0]`,
         { username }
     );
 
-    if (!prospect) {
-        await ctx.reply("Please start the conversation with /start.");
-        return;
-    }
+    if (!prospect) return;
 
-    // Logic: Transition based on current step
-    switch (prospect.currentStep) {
+    if (prospect.currentStep === 'collect_name') {
+        // Save Name and trigger Contact Request Button
+        await client.patch(prospect._id)
+            .set({
+                name: text,
+                currentStep: 'collect_phone'
+            })
+            .commit();
 
-        case 'collect_name':
-            // Save name, move to phone
-            await client.patch(prospect._id)
-                .set({
-                    name: text,
-                    currentStep: 'collect_phone'
-                })
-                .commit();
-            await ctx.reply("Thanks! Now, please provide your phone number.");
-            break;
-
-        case 'collect_phone':
-            // Validate phone
-            if (!validator.isMobilePhone(text)) {
-                await ctx.reply("That doesn't look like a valid phone number. Please try again.");
-            } else {
-                // Save phone, mark complete
-                await client.patch(prospect._id)
-                    .set({
-                        phone: text,
-                        currentStep: 'complete'
-                    })
-                    .commit();
-                await ctx.reply("Perfect! We have your details. A sales rep will contact you soon.");
-            }
-            break;
-
-        default:
-            await ctx.reply("I'm not sure what to do next. Type /start to restart.");
-            break;
+        await ctx.reply("Thanks! Now, please share your contact number using the button below.", {
+            reply_markup: {
+                keyboard: [[{ text: "Share My Phone Number", request_contact: true }]],
+                one_time_keyboard: true,
+                resize_keyboard: true,
+            },
+        });
     }
 });
 
-// 4. Export the handler for Vercel
+// 4. Handle shared contact (The Phone number step)
+bot.on("message:contact", async (ctx) => {
+    const username = ctx.from.username;
+    if (!username) return;
+
+    const prospect = await client.fetch(
+        `*[_type == "prospect" && username == $username][0]`,
+        { username }
+    );
+
+    if (prospect && prospect.currentStep === 'collect_phone') {
+        const phone = ctx.message.contact.phone_number;
+
+        // Save Phone and mark complete
+        await client.patch(prospect._id)
+            .set({
+                phone: phone,
+                currentStep: 'complete'
+            })
+            .commit();
+
+        // Remove the keyboard after selection
+        await ctx.reply("Perfect! We have your details. A sales rep will contact you soon.", {
+            reply_markup: { remove_keyboard: true }
+        });
+    }
+});
+
+// 5. Export for Vercel
 export const POST = webhookCallback(bot, "std/http", {
     secretToken: process.env.WEBHOOK_SECRET,
 });
