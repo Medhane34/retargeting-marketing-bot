@@ -186,15 +186,6 @@ bot.command("start", async (ctx) => {
         return;
     }
 
-    // Sync bot description dynamically if defined on the Entry Point step in Sanity
-    if (entryStep.botDescription) {
-        try {
-            await bot.api.setMyDescription(entryStep.botDescription);
-        } catch (err) {
-            console.error("Failed to sync bot description:", err);
-        }
-    }
-
     // Just render the entry step — no Sanity write.
     await sendStep(ctx, entryStep);
 });
@@ -312,8 +303,33 @@ bot.on("message:contact", async (ctx) => {
     await sendStep(ctx, nextStep);
 });
 
+// ─── Bot Description Syncing (with 10-minute cooldown) ─────────────────────────
+
+let lastSyncTime = 0;
+const SYNC_COOLDOWN = 10 * 60 * 1000; // 10 minutes
+
+async function syncBotDescriptionIfNeeded() {
+    if (Date.now() - lastSyncTime < SYNC_COOLDOWN) return;
+    lastSyncTime = Date.now();
+    try {
+        const entryStep = await getEntryStep();
+        if (entryStep?.botDescription) {
+            await bot.api.setMyDescription(entryStep.botDescription);
+            console.log("Successfully synced bot description with Telegram:", entryStep.botDescription);
+        }
+    } catch (err) {
+        console.error("Failed to sync bot description:", err);
+    }
+}
+
 // ─── Vercel Export ────────────────────────────────────────────────────────────
 
-export const POST = webhookCallback(bot, "std/http", {
+const webhookHandler = webhookCallback(bot, "std/http", {
     secretToken: process.env.WEBHOOK_SECRET,
 });
+
+export const POST = async (req: Request) => {
+    // Sync description periodically (rate-limited to 10 minutes)
+    await syncBotDescriptionIfNeeded();
+    return webhookHandler(req);
+};
