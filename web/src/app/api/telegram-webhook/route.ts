@@ -1,4 +1,3 @@
-// Replace your existing imports with these relative paths
 import { Bot, webhookCallback } from "grammy";
 import { client } from "../../../sanity/client";
 import { getNextStep } from "../../../lib/transitionEngine";
@@ -17,14 +16,24 @@ bot.command("start", async (ctx) => {
 bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
 
+    // 1. Acknowledge the callback to stop the loading animation
+    await ctx.answerCallbackQuery();
+
     if (data === "verify_continue") {
-        // Provisioning: Create record in Sanity
-        await client.create({
-            _type: 'prospect',
-            username: ctx.from?.username || "unknown",
-            currentStep: 'collect_name',
-            lastInteraction: new Date().toISOString()
-        });
+        // Check if prospect exists to avoid duplicate creation
+        const existing = await client.fetch(
+            `*[_type == "prospect" && username == $username][0]`,
+            { username: ctx.from.username }
+        );
+
+        if (!existing) {
+            await client.create({
+                _type: 'prospect',
+                username: ctx.from?.username || "unknown",
+                currentStep: 'collect_name',
+                lastInteraction: new Date().toISOString()
+            });
+        }
 
         await ctx.reply("Great! What is your full name?");
     }
@@ -32,29 +41,37 @@ bot.on("callback_query:data", async (ctx) => {
 
 bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
+    const username = ctx.from.username;
 
-    // 1. Fetch current prospect and their step from Sanity
-    const prospect = await client.fetch(
-        `*[_type == "prospect" && username == $username][0]`,
-        { username: ctx.from.username }
-    );
-
-    if (!prospect) return;
-
-    // 2. Conditional Validation based on currentStep
-    if (prospect.currentStep === 'collect_phone') {
-        // Using validator to ensure it's a mobile phone number
-        if (!validator.isMobilePhone(text)) {
-            await ctx.reply("That doesn't look like a valid phone number. Please try again.");
-            return; // Stop here, don't advance the step
-        }
+    if (!username) {
+        await ctx.reply("I couldn't identify your username. Please ensure your Telegram profile has a username set.");
+        return;
     }
 
-    // 3. Logic to advance to next step
+    const prospect = await client.fetch(
+        `*[_type == "prospect" && username == $username][0]`,
+        { username }
+    );
+
+    if (!prospect) {
+        await ctx.reply("Please start the conversation with /start.");
+        return;
+    }
+
+    // Validation
+    if (prospect.currentStep === 'collect_phone' && !validator.isMobilePhone(text)) {
+        await ctx.reply("That doesn't look like a valid phone number. Please try again.");
+        return;
+    }
+
+    // Logic to advance
     const nextStep = await getNextStep(prospect.currentStep, "");
 
     await client.patch(prospect._id)
-        .set({ currentStep: nextStep, lastInteraction: new Date().toISOString() })
+        .set({
+            currentStep: nextStep,
+            lastInteraction: new Date().toISOString()
+        })
         .commit();
 
     await ctx.reply(`Step updated to ${nextStep}. What's next?`);
