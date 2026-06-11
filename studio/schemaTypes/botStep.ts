@@ -33,6 +33,17 @@ export default defineType({
         }),
 
         defineField({
+            name: 'botDescription',
+            title: 'Bot Description (What can this bot do?)',
+            type: 'text',
+            rows: 3,
+            description:
+                'Optional. The description shown to users in Telegram before they start the bot (max 512 characters). ' +
+                'This will be synced dynamically when a user triggers /start. Only used if this step is the Entry Point.',
+            validation: (Rule) => Rule.max(512),
+        }),
+
+        defineField({
             name: 'messageText',
             title: 'Message Text',
             type: 'text',

@@ -186,6 +186,15 @@ bot.command("start", async (ctx) => {
         return;
     }
 
+    // Sync bot description dynamically if defined on the Entry Point step in Sanity
+    if (entryStep.botDescription) {
+        try {
+            await bot.api.setMyDescription(entryStep.botDescription);
+        } catch (err) {
+            console.error("Failed to sync bot description:", err);
+        }
+    }
+
     // Just render the entry step — no Sanity write.
     await sendStep(ctx, entryStep);
 });

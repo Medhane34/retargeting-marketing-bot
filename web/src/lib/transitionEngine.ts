@@ -12,6 +12,7 @@ export interface BotStep {
     _id: string;
     stepId: string;
     messageText: string;
+    botDescription?: string;
     parseMode?: 'none' | 'Markdown' | 'HTML';
     actionType?: 'none' | 'request_contact';
     /** Dot-notation path on the prospect doc to save the user's reply into.
@@ -29,6 +30,7 @@ const STEP_PROJECTION = `{
   _id,
   stepId,
   messageText,
+  botDescription,
   parseMode,
   actionType,
   collectsField,

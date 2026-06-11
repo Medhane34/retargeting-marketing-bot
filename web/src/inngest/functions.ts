@@ -36,7 +36,7 @@ export const sendAbandonmentNudge = inngest.createFunction(
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             chat_id: event.data.telegramChatId,
-                            text: "👋 Hey! We noticed you didn't finish your registration. Want to continue? Tap /start whenever you're ready!",
+                            text: "👋 Hey! We noticed you didn't finish your booking. Want to continue? pick up where you left off whenever you're ready!",
                         }),
                     }
                 );
