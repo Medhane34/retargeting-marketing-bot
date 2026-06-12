@@ -36,7 +36,7 @@ export const sendAbandonmentNudge = inngest.createFunction(
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             chat_id: event.data.telegramChatId,
-                            text: "👋 Hey! We noticed you didn't finish your booking. Want to continue? pick up where you left off whenever you're ready!",
+                            text: " አሰሰመንቱን ጀምረሃል ግን አላጠናቀቅክም። /n ቢዝነስህ ብቁ መሆኑን ለማየት ጥቂት እርምጃዎች ብቻ ቀርተዋል። ዝግጁ ሰትሆን ካቁምበት መቀጠል ትችላለህ።",
                         }),
                     }
                 );

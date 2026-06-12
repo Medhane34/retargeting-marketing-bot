@@ -33,7 +33,7 @@ async function getDailyRegistrationCount(): Promise<number> {
 async function handleDelayIfNeeded(ctx: Context, step: BotStep) {
     if ((step.actionType as string) === 'delay_typing') {
         await ctx.replyWithChatAction("typing");
-        await new Promise((resolve) => setTimeout(resolve, 3500));
+        await new Promise((resolve) => setTimeout(resolve, 5500));
     }
 }
 
@@ -126,7 +126,7 @@ async function sendStep(ctx: Context, step: BotStep) {
         await ctx.reply(messageText, {
             parse_mode,
             reply_markup: {
-                keyboard: [[{ text: "📱 ስልክ ቁጥሬን ላጋራ", request_contact: true }]],
+                keyboard: [[{ text: "📱 ስልክ ቁጥሬን አጋራ", request_contact: true }]],
                 one_time_keyboard: true,
                 resize_keyboard: true,
             },
@@ -139,7 +139,7 @@ async function sendStep(ctx: Context, step: BotStep) {
 
 // ─── Bot Handlers ─────────────────────────────────────────────────────────────
 
-bot.command("start", async (ctx) => {
+bot.command("ጀምር", async (ctx) => {
     const username = ctx.from?.username;
     if (!username) return await ctx.reply("Please set a username.");
     const entryStep = await getEntryStep();
