@@ -10,9 +10,8 @@ import {
 
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN!);
 
-// ─── Helper Functions ─────────────────────────────────────────────────────────
+// ─── All Helper Functions ─────────────────────────────────────────────────────────
 
-/** Fetch a prospect document by Telegram username. */
 async function fetchProspect(username: string) {
     return client.fetch(
         `*[_type == "prospect" && username == $username][0]`,
@@ -20,7 +19,6 @@ async function fetchProspect(username: string) {
     );
 }
 
-/** Get count of prospects created in the last 24 hours. */
 async function getDailyRegistrationCount(): Promise<number> {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     return await client.fetch(
@@ -29,7 +27,6 @@ async function getDailyRegistrationCount(): Promise<number> {
     );
 }
 
-/** * Checks if a step has a delay action. */
 async function handleDelayIfNeeded(ctx: Context, step: BotStep) {
     if ((step.actionType as string) === 'delay_typing') {
         await ctx.replyWithChatAction("typing");
@@ -37,7 +34,6 @@ async function handleDelayIfNeeded(ctx: Context, step: BotStep) {
     }
 }
 
-/** Auto-advance if step is marked to do so. */
 async function handleAutoAdvance(ctx: Context, step: BotStep, prospectId: string) {
     if ((step.actionType as string) === 'auto_advance') {
         const nextStepId = resolveNextStepId(step);
@@ -53,25 +49,6 @@ async function handleAutoAdvance(ctx: Context, step: BotStep, prospectId: string
     }
 }
 
-/** Create a new prospect or update their currentStep. */
-async function upsertProspect(username: string, stepId: string) {
-    const existing = await fetchProspect(username);
-    if (!existing) {
-        await client.create({
-            _type: "prospect",
-            username,
-            currentStep: stepId,
-            lastInteraction: new Date().toISOString(),
-        });
-    } else {
-        await client.patch(existing._id)
-            .set({ currentStep: stepId, lastInteraction: new Date().toISOString() })
-            .commit();
-    }
-    return existing;
-}
-
-/** Save a collected field value to the prospect document. */
 async function saveCollectedField(prospectId: string, fieldPath: string, value: string) {
     if (fieldPath.startsWith('crmData.')) {
         const fieldKey = fieldPath.slice('crmData.'.length);
@@ -89,7 +66,6 @@ async function saveCollectedField(prospectId: string, fieldPath: string, value: 
     }
 }
 
-/** Advance a prospect to the next step. */
 async function advanceProspect(prospectId: string, nextStepId: string, collectsField?: string, collectedValue?: string) {
     if (collectsField && collectedValue !== undefined) {
         await saveCollectedField(prospectId, collectsField, collectedValue);
@@ -102,22 +78,30 @@ async function advanceProspect(prospectId: string, nextStepId: string, collectsF
 
 // ─── Telegram Renderer ────────────────────────────────────────────────────────
 
-/** Render a BotStep document as a Telegram message. */
 async function sendStep(ctx: Context, step: BotStep) {
-    // 1. Get the dynamic count
     const count = await getDailyRegistrationCount();
-
-    // 2. Inject the count into the message text if the placeholder exists
     let messageText = step.messageText.replace(/{{daily_count}}/g, count.toString());
-
     const parse_mode = step.parseMode && step.parseMode !== "none" ? (step.parseMode as "Markdown" | "HTML") : undefined;
 
+    // UI Logic: Vertical Stacking for long or dense buttons
     if (step.buttons?.length) {
-        const inline_keyboard = [
-            step.buttons.map((btn) =>
+        const BUTTON_CHAR_LIMIT = 15;
+        const MAX_HORIZONTAL_COUNT = 3;
+        const isTooLong = step.buttons.some((btn) => btn.label.length > BUTTON_CHAR_LIMIT);
+        const isTooDense = step.buttons.length > MAX_HORIZONTAL_COUNT;
+
+        let inline_keyboard;
+        if (isTooLong || isTooDense) {
+            inline_keyboard = step.buttons.map((btn) => [
                 btn.url ? { text: btn.label, url: btn.url } : { text: btn.label, callback_data: btn.nextStepId! }
-            ),
-        ];
+            ]);
+        } else {
+            inline_keyboard = [
+                step.buttons.map((btn) =>
+                    btn.url ? { text: btn.label, url: btn.url } : { text: btn.label, callback_data: btn.nextStepId! }
+                ),
+            ];
+        }
         await ctx.reply(messageText, { parse_mode, reply_markup: { inline_keyboard } });
         return;
     }
@@ -156,11 +140,8 @@ bot.on("callback_query:data", async (ctx) => {
 
     if (!username) return;
 
-    const nextStep = await getStepById(nextStepId);
-    if (!nextStep) return;
-
+    // 1. Get current status
     let prospect = await fetchProspect(username);
-
     if (!prospect) {
         const newProspect = await client.create({
             _type: "prospect",
@@ -169,14 +150,26 @@ bot.on("callback_query:data", async (ctx) => {
             currentStep: nextStepId,
             lastInteraction: new Date().toISOString(),
         });
-        await inngest.send({
-            name: "user/started-flow",
-            data: { username, prospectId: newProspect._id, telegramChatId: ctx.from!.id },
-        });
         prospect = newProspect;
-    } else {
-        await advanceProspect(prospect._id, nextStepId);
     }
+
+    // 2. Resolve current step to check for CRM field collection
+    const currentStep = await getStepById(prospect.currentStep);
+
+    // 3. NEW LOGIC: Save field if buttons were used to collect data
+    if (currentStep?.collectsField) {
+        const selectedButton = currentStep.buttons?.find(b => b.nextStepId === nextStepId);
+        if (selectedButton) {
+            await saveCollectedField(prospect._id, currentStep.collectsField, selectedButton.label);
+        }
+    }
+
+    // 4. Advance
+    await advanceProspect(prospect._id, nextStepId);
+
+    // 5. Render Next
+    const nextStep = await getStepById(nextStepId);
+    if (!nextStep) return;
 
     await handleDelayIfNeeded(ctx, nextStep);
     await sendStep(ctx, nextStep);
@@ -236,6 +229,8 @@ bot.on("message:contact", async (ctx) => {
     await handleAutoAdvance(ctx, nextStep, prospect._id);
 });
 
+// ─── Sync & Export ────────────────────────────────────────────────────────────
+
 let lastSyncTime = 0;
 const SYNC_COOLDOWN = 10 * 60 * 1000;
 
@@ -260,3 +255,4 @@ export const POST = async (req: Request) => {
     await syncBotDescriptionIfNeeded();
     return webhookHandler(req);
 };
+
