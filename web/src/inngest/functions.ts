@@ -10,7 +10,7 @@ export const sendAbandonmentNudge = inngest.createFunction(
     },
     async ({ event, step }) => {
         // Test delay: 2 minutes (Changed from 24h)
-        await step.sleep("wait-2-minutes", "2m");
+        await step.sleep("wait-30-minutes", "30m");
 
         // Fetch the prospect from Sanity using the username passed in the event
         // Wrapped in step.run for Inngest's durable execution guarantee
