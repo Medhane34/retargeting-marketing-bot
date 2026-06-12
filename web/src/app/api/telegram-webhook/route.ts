@@ -150,6 +150,10 @@ bot.on("callback_query:data", async (ctx) => {
             currentStep: nextStepId,
             lastInteraction: new Date().toISOString(),
         });
+        await inngest.send({
+            name: "user/started-flow",
+            data: { username, prospectId: newProspect._id, telegramChatId: ctx.from!.id },
+        });
         prospect = newProspect;
     }
 
