@@ -33,7 +33,7 @@ async function getDailyRegistrationCount(): Promise<number> {
 async function handleDelayIfNeeded(ctx: Context, step: BotStep) {
     if ((step.actionType as string) === 'delay_typing') {
         await ctx.replyWithChatAction("typing");
-        await new Promise((resolve) => setTimeout(resolve, 5500));
+        await new Promise((resolve) => setTimeout(resolve, 3500));
     }
 }
 
@@ -139,7 +139,7 @@ async function sendStep(ctx: Context, step: BotStep) {
 
 // ─── Bot Handlers ─────────────────────────────────────────────────────────────
 
-bot.command("ጀምር", async (ctx) => {
+bot.command("start", async (ctx) => {
     const username = ctx.from?.username;
     if (!username) return await ctx.reply("Please set a username.");
     const entryStep = await getEntryStep();
