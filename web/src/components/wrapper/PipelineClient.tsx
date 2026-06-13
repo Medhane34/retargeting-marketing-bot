@@ -1,11 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Prospect } from "@/types/sanity.types";
+import { useEffect, useMemo, useState } from "react";
+import { NudgeTemplate, Prospect } from "@/types/sanity.types";
 import { DataTable } from "../DataTable";
 import { ColumnDef } from "@tanstack/react-table";
 import { SearchInput } from "../SearchInput";
 import { FilterBar } from "../FilterBar";
+import { ActionMenu } from "../ActionMenu";
+import { fetchActiveNudgeTemplates } from "@/sanity/fetch";
+import { Button } from "@heroui/react";
+import { MessageCircle } from "lucide-react";
 
 interface PipelineClientProps {
     data: Prospect[];
@@ -13,7 +17,17 @@ interface PipelineClientProps {
 
 export default function PipelineClient({ data }: PipelineClientProps) {
     const [globalFilter, setGlobalFilter] = useState("");
+    const [activeTemplates, setActiveTemplates] = useState<NudgeTemplate[]>([]);
 
+    // fetch 
+    // 2. Fetch them when the component mounts
+    useEffect(() => {
+        async function loadTemplates() {
+            const data = await fetchActiveNudgeTemplates();
+            setActiveTemplates(data);
+        }
+        loadTemplates();
+    }, []);
     // Multi-select state: { [columnId]: string[] }
     const [filterState, setFilterState] = useState<Record<string, string[]>>({
         currentStep: [], name: []
@@ -69,7 +83,37 @@ export default function PipelineClient({ data }: PipelineClientProps) {
             accessorKey: "lastInteraction",
             cell: (info) => formatDate(info.getValue() as string),
         },
-    ], [uniqueCrmKeys]);
+        // Add this to your columns array in PipelineClient.tsx
+        {
+            id: "actions",
+            header: "Actions",
+            cell: ({ row }) => (
+                <div className="flex items-center gap-2">
+                    {/* Telegram Deep-link Button */}
+                    {/* Telegram Deep-link using a standard <a> tag wrapper */}
+                    <a
+                        href={`https://t.me/${row.original.username}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        <Button
+                            isIconOnly
+                            size="sm"
+                            variant="ghost"
+                        >
+                            <MessageCircle size={16} />
+                        </Button>
+                    </a>
+                    {/* Existing Nudge Menu */}
+                    <ActionMenu
+                        prospectId={row.original._id || ""}
+                        prospectName={row.original.name || "Prospect"}
+                        templates={activeTemplates}
+                    />
+                </div>
+            ),
+        },
+    ], [uniqueCrmKeys, activeTemplates]);
 
     return (
         <div className="space-y-4">

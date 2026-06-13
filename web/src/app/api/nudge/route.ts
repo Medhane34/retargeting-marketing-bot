@@ -9,9 +9,10 @@ export async function POST(req: Request) {
         const prospect = await client.fetch(
             `*[_type == "prospect" && _id == $id][0]`,
             { id: prospectId }
-        );
 
+        );
         if (!prospect || !prospect.telegramChatId) {
+            console.error("Missing ID for prospect:", prospect);
             return NextResponse.json({ error: "Prospect or Telegram ID not found" }, { status: 404 });
         }
 
@@ -23,10 +24,22 @@ export async function POST(req: Request) {
                 `*[_type == "nudgeTemplate" && _id == $id][0]`,
                 { id: templateId }
             );
-            if (!template) return NextResponse.json({ error: "Template not found" }, { status: 404 });
 
-            // Replace placeholder
-            messageText = template.body.replace("{{name}}", prospect.name);
+            // Check if template exists
+            if (!template) {
+                return NextResponse.json({ error: "Template not found" }, { status: 404 });
+            }
+
+            // Check if body exists and is a string
+            if (!template.messageBody || typeof template.messageBody !== 'string') {
+                console.error("Template body is missing or invalid for ID:", templateId);
+                return NextResponse.json({ error: "Template body is empty" }, { status: 400 });
+            }
+
+            // Safely replace, using a fallback for name just in case
+            const safeName = prospect.name || "Customer";
+            messageText = template.messageBody.replace(/{name}/g, safeName);
+
         } else if (customMessage) {
             messageText = customMessage;
         } else {
@@ -41,7 +54,7 @@ export async function POST(req: Request) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                chat_id: prospect.telegramId,
+                chat_id: prospect.telegramChatId,
                 text: messageText,
             }),
         });
