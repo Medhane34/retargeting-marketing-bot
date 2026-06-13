@@ -22,6 +22,8 @@ export async function fetchActiveNudgeTemplates(): Promise<NudgeTemplate[]> {
 export const PROSPECTS_QUERY = groq`
   *[_type == "prospect"] | order(_createdAt desc) {
     _id,
+    telegramChatId,
+    username,
     name,
     phone,
     currentStep,

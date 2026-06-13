@@ -11,7 +11,7 @@ export async function POST(req: Request) {
             { id: prospectId }
         );
 
-        if (!prospect || !prospect.telegramId) {
+        if (!prospect || !prospect.telegramChatId) {
             return NextResponse.json({ error: "Prospect or Telegram ID not found" }, { status: 404 });
         }
 
