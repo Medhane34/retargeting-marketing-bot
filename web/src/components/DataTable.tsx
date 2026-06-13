@@ -10,20 +10,30 @@ import {
     SortingState,
     ColumnFiltersState,
     ColumnDef,
+    FilterFn,
 } from "@tanstack/react-table";
 import { ArrowUpDown } from "lucide-react";
 
 interface DataTableProps<TData, TValue> {
     columns: ColumnDef<TData, TValue>[];
     data: TData[];
+    globalFilter: string; // New prop for search
+    columnFilters: ColumnFiltersState;
 }
+
+const multiSelectFilter: FilterFn<any> = (row, id, filterValue: string[]) => {
+    if (!filterValue || filterValue.length === 0) return true;
+    return filterValue.includes(row.getValue(id));
+};
+
 
 export function DataTable<TData, TValue>({
     data,
     columns,
+    globalFilter, // Receive search term
+    columnFilters, // 1. Use the prop here
 }: DataTableProps<TData, TValue>) {
     const [sorting, setSorting] = useState<SortingState>([]);
-    const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
 
     const table = useReactTable({
         data,
@@ -31,9 +41,26 @@ export function DataTable<TData, TValue>({
         getCoreRowModel: getCoreRowModel(),
         getSortedRowModel: getSortedRowModel(),
         getFilteredRowModel: getFilteredRowModel(),
+        filterFns: {
+            multiSelect: multiSelectFilter, // Register it here
+        },
         onSortingChange: setSorting,
-        onColumnFiltersChange: setColumnFilters,
-        state: { sorting, columnFilters },
+        // Global Filter Logic
+        state: {
+            sorting,
+            columnFilters,
+            globalFilter
+        },
+        globalFilterFn: (row, columnId, filterValue,) => {
+            const name = (row.getValue("name") as string) || "";
+            const phone = (row.getValue("phone") as string) || "";
+            const search = filterValue.toLowerCase();
+            return name.toLowerCase().includes(search) || phone.toLowerCase().includes(search);
+            return (
+                name.toLowerCase().includes(search) ||
+                phone.toLowerCase().includes(search)
+            );
+        },
     });
 
     return (
@@ -71,7 +98,7 @@ export function DataTable<TData, TValue>({
                     ) : (
                         <tr>
                             <td colSpan={columns.length} className="h-24 text-center text-gray-500">
-                                No prospects found.
+                                No prospects found matching your search.
                             </td>
                         </tr>
                     )}

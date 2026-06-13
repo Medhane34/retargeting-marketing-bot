@@ -15,6 +15,18 @@
 export declare const internalGroqTypeReferenceTo: unique symbol;
 
 // Source: schema.json
+export type NudgeTemplate = {
+  _id: string;
+  _type: "nudgeTemplate";
+  _createdAt: string;
+  _updatedAt: string;
+  _rev: string;
+  title?: string;
+  category?: "24h" | "72h" | "7d" | "general";
+  messageBody?: string;
+  isActive?: boolean;
+};
+
 export type Prospect = {
   _id: string;
   _type: "prospect";
@@ -179,6 +191,7 @@ export type Slug = {
 };
 
 export type AllSanitySchemaTypes =
+  | NudgeTemplate
   | Prospect
   | BotStep
   | SanityImagePaletteSwatch
